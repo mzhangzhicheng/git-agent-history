@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-agent-history"
+version = "0.1.0"
+description = "Git-backed backup, sync and restore for coding-agent conversations (Codex, Claude Code), one folder per device."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Zhicheng Zhang"}]
+keywords = ["codex", "claude-code", "ai-agents", "coding-agent", "chat-history", "session", "backup", "sync", "git", "deepseek"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Archiving :: Backup",
+]
+dependencies = []
+
+[project.optional-dependencies]
+zstd = ["zstandard"]
+
+[project.scripts]
+git-agent-history = "git_agent_history.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/mzhangzhicheng/git-agent-history"
+Issues = "https://github.com/mzhangzhicheng/git-agent-history/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

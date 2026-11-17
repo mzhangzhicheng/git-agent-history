@@ -1,0 +1,69 @@
+"""Interface every agent adapter implements. See docs/adding-an-agent.md."""
+from __future__ import annotations
+
+import os
+from pathlib import Path, PurePosixPath
+
+from ..util import running_processes
+
+
+class Source:
+    """A file to back up: `rel` is its POSIX path relative to the agent home."""
+    __slots__ = ('rel', 'path', 'kind')
+
+    def __init__(self, rel: str, path: Path, kind: str):
+        self.rel, self.path, self.kind = rel, path, kind  # kind: 'jsonl' | 'blob' | 'zst'
+
+
+class Adapter:
+    name = ''           # stable identifier used in the history repository
+    display_name = ''
+    env_var = ''        # environment variable that overrides the default home
+
+    def default_home(self) -> Path:
+        raise NotImplementedError
+
+    def sources(self, home: Path):
+        """Yield Source objects. Must never follow symlinks or leave `home`."""
+        raise NotImplementedError
+
+    def allowed(self, rel: PurePosixPath) -> bool:
+        """Allow-list used when restoring paths read from a manifest."""
+        raise NotImplementedError
+
+    def index_kind(self, rel: str):
+        """'lines' or 'id' for shared index files that are merged on restore, else None."""
+        return None
+
+    def is_running_process(self, exe: str, args: str) -> bool:
+        return False
+
+    def running(self) -> bool:
+        return any(self.is_running_process(exe, args) for exe, args in running_processes())
+
+    def databases(self, home: Path):
+        """SQLite databases worth snapshotting (online backup API)."""
+        return []
+
+    def target_paths(self, staged: Path, rels, mappings):
+        """Map stored relative paths to restore paths (e.g. moved project folders)."""
+        return {rel: rel for rel in rels}
+
+    def rewrite_database(self, path: Path, old_home: str, target: Path, mappings) -> None:
+        pass
+
+    def has_transcripts(self, home: Path) -> bool:
+        return any(s.kind in ('jsonl', 'zst') and self.index_kind(s.rel) is None
+                   for s in self.sources(home))
+
+
+def walk_files(root: Path):
+    """Yield regular files below root; symlinked files and directories are skipped."""
+    if not root.is_dir() or root.is_symlink():
+        return
+    for directory, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames.sort()
+        for name in sorted(filenames):
+            path = Path(directory) / name
+            if not path.is_symlink() and path.is_file():
+                yield path

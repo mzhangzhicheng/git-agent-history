@@ -1,0 +1,35 @@
+---
+name: git-agent-history
+description: Back up, sync and restore coding-agent conversation history (Codex, Claude Code) through the user's private Git repository, one folder per device. Use when the user wants agent chat history saved across machines or containers, restored from another device, or moved to a new path.
+---
+
+# git-agent-history
+
+git-agent-history copies the conversation history of Codex and Claude Code into a
+private Git repository that the user owns. Every machine or container writes to its own
+`devices/<device-id>/` folder. History can then be restored on any other machine.
+
+Project: https://github.com/mzhangzhicheng/git-agent-history
+
+## When to use
+
+- The user wants their agent conversations backed up or synced across machines.
+- The user lost history (rebuilt container, new laptop, or Claude Code's 30-day cleanup) and wants it back from another device.
+- The user moved projects to new paths and wants old sessions to appear there.
+
+## How
+
+Follow `docs/agent-setup.md` in the project repository step by step. Key rules:
+
+- Never ask for, print or store tokens. GitHub login happens in the user's browser with `gh auth login --web`.
+- The history repository must be private, and each environment gets its own state directory and device ID.
+- Never force-push or modify other devices' folders. Restore only when asked, and prefer `export` into an empty folder first.
+
+Every command prints JSON:
+
+```sh
+git-agent-history init --repo OWNER/NAME --label "my laptop"
+git-agent-history once && git-agent-history start && git-agent-history status
+git-agent-history pull && git-agent-history devices
+git-agent-history restore --from-device ID --agent codex|claude-code --target PATH [--map-cwd OLD=NEW] [--session ID] [--dry-run]
+```

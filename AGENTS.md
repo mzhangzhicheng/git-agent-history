@@ -1,0 +1,20 @@
+# Notes for coding agents
+
+- **Setting up backups for a user?** Follow [docs/agent-setup.md](docs/agent-setup.md). It covers end-user setup; this file is about changing the code.
+- **Layout.** `src/git_agent_history/`:
+  - `cli.py`: argument parsing; every command prints JSON.
+  - `client.py`: config, checkpoint, Git sync, restore.
+  - `store.py`: the chunk and blob format.
+  - `secrets.py`: redaction.
+  - `service.py`: background worker and autostart.
+  - `adapters/`: one module per agent.
+- **Runtime.** Python 3.9+ standard library only; no third-party runtime dependencies. Code must run on Linux, macOS and Windows.
+- **Tests.** Run `python3 -m unittest discover -s tests -v`. They must stay offline and use temporary folders, a local bare repository and synthetic transcripts. Never commit real conversation history. Build token-like test strings at runtime so that the source contains no credential-shaped literals.
+- **Safety.** Changes must keep these invariants:
+  - only the own `devices/<id>/` folder is committed;
+  - no force-push;
+  - restore never overwrites existing files;
+  - manifest paths are validated before use;
+  - subprocess output is not written to status files.
+- **Storage format.** It is documented in [docs/design.md](docs/design.md). Changing it needs a new `format` number and a reader for the old one.
+- **New agents.** See [docs/adding-an-agent.md](docs/adding-an-agent.md).

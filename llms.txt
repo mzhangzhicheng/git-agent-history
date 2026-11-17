@@ -1,0 +1,10 @@
+# git-agent-history
+
+> Command-line tool (Python 3.9+, no dependencies) that backs up, syncs and restores coding-agent conversation history, currently Codex and Claude Code, through a private Git repository with one folder per device. It is for people who use agents on several machines, servers or ephemeral cloud containers and do not want to lose sessions.
+
+- [README](https://github.com/mzhangzhicheng/git-agent-history/blob/main/README.md): features, quick start, restore, security model
+- [Setup guide for agents](https://github.com/mzhangzhicheng/git-agent-history/blob/main/docs/agent-setup.md): step-by-step instructions an AI agent can follow to install and configure it
+- [Design](https://github.com/mzhangzhicheng/git-agent-history/blob/main/docs/design.md): repository layout, manifest format, checkpoint/sync/restore algorithms
+- [Adding an agent](https://github.com/mzhangzhicheng/git-agent-history/blob/main/docs/adding-an-agent.md): adapter interface
+
+Key facts: commands print JSON; it refuses public repositories; it redacts known credential formats by default; restore never overwrites existing files; `--map-cwd OLD=NEW` remaps project paths; Claude Code transcripts older than cleanupPeriodDays (default 30) remain restorable once backed up.

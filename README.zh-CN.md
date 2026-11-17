@@ -22,7 +22,8 @@ Agent 自己清理，都会让历史消失。例如 Claude Code 会删除超过
 - **对 Agent 友好**：所有命令都输出 JSON。按 [`docs/agent-setup.md`](docs/agent-setup.md) 或 [skill](skills/git-agent-history/SKILL.md)，可以让你的 Agent 替你完成接入。
 - **无第三方依赖**：只需要 Python 3.9+ 标准库和 `git`，隐私检查用 GitHub CLI（`gh`）。
 
-> 状态：**v0.1，早期版本**。已在 macOS、Linux 上测试，Windows 在 CI 中测试。
+> 状态：**v0.1，早期版本**。测试套件在 CI 中覆盖 Linux、macOS、Windows 和 Python 3.9–3.14；
+> 用真实的 Codex 0.169 和 Claude Code 2.1 历史做的端到端演练，目前只在 macOS 上做过。
 > 如果在你的 Agent 版本上遇到问题，欢迎提 issue。
 
 ## 支持的 Agent

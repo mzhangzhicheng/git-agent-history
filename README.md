@@ -24,8 +24,9 @@ history to any other machine, and remap project paths along the way.
 - **Agent-friendly.** Every command prints JSON. [`docs/agent-setup.md`](docs/agent-setup.md) and a [skill](skills/git-agent-history/SKILL.md) let your coding agent do the setup for you.
 - **No dependencies.** Python 3.9+ standard library, `git`, and the GitHub CLI (`gh`) for the privacy check.
 
-> Status: **v0.1, early.** Tested on macOS and Linux and in CI on Windows. Please report
-> problems with your agent version in an issue.
+> Status: **v0.1, early.** The test suite runs in CI on Linux, macOS and Windows with Python
+> 3.9–3.14. End-to-end trials with real Codex 0.169 and Claude Code 2.1 history have so far
+> been run on macOS. Please report problems with your agent version in an issue.
 
 ## Supported agents
 

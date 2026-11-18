@@ -1,11 +1,11 @@
 ---
 name: git-agent-history
-description: Back up, sync and restore coding-agent conversation history (Codex, Claude Code) through the user's private Git repository, one folder per device. Use when the user wants agent chat history saved across machines or containers, restored from another device, or moved to a new path.
+description: Back up, sync and restore coding-agent conversation history (Codex, Claude Code, DeepSeek Harness) through the user's private Git repository, one folder per device. Use when the user wants agent chat history saved across machines or containers, restored from another device, or moved to a new path.
 ---
 
 # git-agent-history
 
-git-agent-history copies the conversation history of Codex and Claude Code into a
+git-agent-history copies the conversation history of Codex, Claude Code and DeepSeek Harness into a
 private Git repository that the user owns. Every machine or container writes to its own
 `devices/<device-id>/` folder. History can then be restored on any other machine.
 
@@ -31,5 +31,5 @@ Every command prints JSON:
 git-agent-history init --repo OWNER/NAME --label "my laptop"
 git-agent-history once && git-agent-history start && git-agent-history status
 git-agent-history pull && git-agent-history devices
-git-agent-history restore --from-device ID --agent codex|claude-code --target PATH [--map-cwd OLD=NEW] [--session ID] [--dry-run]
+git-agent-history restore --from-device ID --agent codex|claude-code|deepseek-harness --target PATH [--map-cwd OLD=NEW] [--session ID] [--dry-run]
 ```

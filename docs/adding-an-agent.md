@@ -29,6 +29,7 @@ Create `src/git_agent_history/adapters/<agent>.py` with a subclass of `Adapter`
 | `name` | Stable folder name in the history repository, for example `opencode`. It must never change once released. |
 | `display_name`, `env_var`, `default_home()` | Where the history lives. |
 | `sources(home)` | Yield `Source(rel, path, kind)` with `kind` set to `jsonl` (append-only lines), `blob` (whole file) or `zst` (Zstandard-compressed JSONL). Use `walk_files`, which skips symlinks. Yield only conversation files. |
+| `zstd_header_frame` | Set to `True` if the agent expects the first line of a `zst` file in its own frame (DeepSeek Harness does). |
 | `allowed(rel)` | Allow-list for restore. It must accept exactly the paths that `sources` can produce. |
 | `index_kind(rel)` | `'lines'` or `'id'` for shared index files that are merged on restore, otherwise `None`. |
 | `session_id(rel)` | Session ID for listing, or `None` for files that are not sessions. |

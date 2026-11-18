@@ -1,6 +1,6 @@
 # git-agent-history
 
-> Command-line tool (Python 3.9+, no dependencies) that backs up, syncs and restores coding-agent conversation history, currently Codex and Claude Code, through a private Git repository with one folder per device. It is for people who use agents on several machines, servers or ephemeral cloud containers and do not want to lose sessions.
+> Command-line tool (Python 3.9+, no dependencies) that backs up, syncs and restores coding-agent conversation history, currently Codex, Claude Code and DeepSeek Harness (dsh), through a private Git repository with one folder per device. It is for people who use agents on several machines, servers or ephemeral cloud containers and do not want to lose sessions.
 
 - [README](https://github.com/mzhangzhicheng/git-agent-history/blob/main/README.md): features, quick start, restore, security model
 - [Setup guide for agents](https://github.com/mzhangzhicheng/git-agent-history/blob/main/docs/agent-setup.md): step-by-step instructions an AI agent can follow to install and configure it

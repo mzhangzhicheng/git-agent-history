@@ -14,11 +14,11 @@ import re
 import shutil
 import tempfile
 
-from . import codec, secrets
+from . import secrets
 from .util import (MAX_CHUNK_PLAINTEXT, READ_SIZE, file_range, gzip_read_into, gzip_write, now,
                    read_json, safe_rel, sha256_bytes, write_json)
 
-FORMAT = 1
+FORMAT = 2  # 2: compressed transcripts are stored as plaintext chunks (encoding: zstd)
 MAX_BLOB_SOURCE = 512 * 1024 * 1024
 _CHUNK_NAME = re.compile(r'g[0-9]{3,6}-[0-9]{5}\.gz')
 
@@ -121,34 +121,22 @@ class AgentStore:
             start = stop
         return chunks
 
-    def backup_blob(self, rel: str, src: Path, entry, transform, zstd_file=False):
-        """Store a whole file. .zst content is decompressed for scanning when possible."""
+    def backup_blob(self, rel: str, src: Path, entry, transform, raw=False):
+        """Store a whole file. `raw` skips redaction (compressed data without a decoder)."""
         if src.stat().st_size > MAX_BLOB_SOURCE:
             raise ValueError('File too large to back up: ' + rel)
         data = src.read_bytes()
-        scan = 'done'
         found = {}
-        if zstd_file:
-            plain = None
-            if codec.available():
-                try:
-                    plain = codec.decompress(data)
-                except Exception:  # corrupt or still being written: keep the original bytes
-                    plain = None
-            if plain is None:
-                scan = 'skipped'
-            else:
-                stored_plain, found = transform(plain)
-                if stored_plain != plain:
-                    data = codec.compress(stored_plain)
-        else:
+        if not raw:
             data, found = transform(data)
         digest = sha256_bytes(data)
         if entry and entry.get('kind') == 'blob' and entry.get('sha256') == digest \
                 and self.exists(rel, entry):
             return entry, False
         new = {'kind': 'blob', 'bytes': len(data), 'sha256': digest, 'secrets': found,
-               'secret_scan': scan, 'present': True, 'updated_at': now()}
+               'present': True, 'updated_at': now()}
+        if raw:
+            new['secret_scan'] = 'skipped'
         gzip_write(self._blob_path(rel, new), [data])
         return new, True
 

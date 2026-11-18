@@ -19,6 +19,7 @@ class Adapter:
     name = ''           # stable identifier used in the history repository
     display_name = ''
     env_var = ''        # environment variable that overrides the default home
+    zstd_header_frame = False  # re-encode .zst files with the first line in its own frame
 
     def default_home(self) -> Path:
         raise NotImplementedError
@@ -46,7 +47,7 @@ class Adapter:
         return []
 
     def target_paths(self, staged: Path, rels, mappings):
-        """Map stored relative paths to restore paths (e.g. moved project folders)."""
+        """Map stored paths to restore paths for --map-cwd. May also edit the staged files."""
         return {rel: rel for rel in rels}
 
     def rewrite_database(self, path: Path, old_home: str, target: Path, mappings) -> None:

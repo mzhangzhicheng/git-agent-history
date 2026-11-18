@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.2.0 (2026-11-18)
+
+- **DeepSeek Harness** (`dsh`) support: backs up session logs from `$DSH_HOME/sessions` (default `~/.dsh/sessions`), including compressed `*.jsonl.zstd` logs. With `--map-cwd`, a restore rewrites each session's project path and moves it to the matching folder. New `--dsh-home` option for `init`.
+- Compressed transcripts (Codex `*.jsonl.zst`, DeepSeek Harness `*.jsonl.zstd`) are now stored as incremental plaintext chunks and compressed again on restore, so active compressed logs no longer re-upload in full. Storage format 2; format 1 backups remain restorable.
+- `sessions` lists each session once, even when an agent keeps several format generations.
+- Shorter README that leads with letting your coding agent do the setup.
+
+## 0.1.0 (2026-11-17)
 
 First public version.
 

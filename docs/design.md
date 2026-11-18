@@ -31,7 +31,7 @@ Non-goals:
 ## Repository layout
 
 ```text
-git-agent-history.json             {"format": 1, "tool": "git-agent-history", "url": ...}
+git-agent-history.json             {"format": 2, "tool": "git-agent-history", "url": ...}
 README.md                          reminder that the repository must stay private
 .gitattributes                     "* -text": never convert line endings
 devices/<device-id>/device.json    owner client_id, label, platform, hostname, agents
@@ -44,11 +44,11 @@ devices/<device-id>/<agent>/databases/<name>.gz                SQLite snapshots
 `<rel>` is the file's POSIX path relative to the agent home, for example
 `sessions/2026/11/17/rollout-…-<uuid>.jsonl` or `projects/-Users-me-code/<uuid>.jsonl`.
 
-## Manifest (format 1)
+## Manifest (format 2)
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "agent": "codex",
   "home": "/Users/me/.codex",
   "updated_at": "2026-11-17T08:00:00+00:00",
@@ -65,8 +65,8 @@ devices/<device-id>/<agent>/databases/<name>.gz                SQLite snapshots
       "updated_at": "…"
     },
     "archived_sessions/rollout-….jsonl.zst": {
-      "kind": "blob", "bytes": 52000, "sha256": "…", "secret_scan": "done",
-      "secrets": {}, "present": true, "updated_at": "…"
+      "kind": "jsonl", "encoding": "zstd", "generation": 1, "chunks": ["…"],
+      "bytes": 52000, "sha256": "…", "secrets": {}, "present": true, "updated_at": "…"
     }
   },
   "databases": {
@@ -94,12 +94,17 @@ For every file an adapter reports:
      the old chunk files and store the whole stream. Git history keeps the old ones.
    - A chunk holds at most 64 MiB of plaintext, which keeps every stored file below
      GitHub's 100 MB limit.
-3. **Blob.** Store the whole file when its (redacted) SHA-256 changes. For `.jsonl.zst`,
-   the content is decompressed for redaction and recompressed, if a Zstandard backend is
-   available (Python 3.14 `compression.zstd`, the `zstandard` package, or the `zstd`
-   CLI). Otherwise the bytes are stored unchanged and `secret_scan` is `skipped`.
-4. Files no longer reported by the adapter keep their entry with `present: false`.
-5. **Databases.** At most every `db_interval` seconds (default 6 hours), copy each database
+3. **Zstandard JSONL** (Codex `*.jsonl.zst`, DeepSeek Harness `*.jsonl.zstd`). Decompress
+   every complete frame and ignore a torn last frame that is still being written. Then
+   store the plaintext exactly like JSONL above, with `encoding: "zstd"`, so that a log that
+   grows by appended frames only adds chunks. Restore compresses the file again into
+   checksummed frames. For DeepSeek Harness the header line gets its own first frame, as
+   its reader expects. This needs a Zstandard backend: Python 3.14 `compression.zstd`,
+   the `zstandard` package, or the `zstd` CLI. Without one, the file is stored as an
+   unredacted blob with `secret_scan: "skipped"`.
+4. **Blob.** Store the whole file when its (redacted) SHA-256 changes.
+5. Files no longer reported by the adapter keep their entry with `present: false`.
+6. **Databases.** At most every `db_interval` seconds (default 6 hours), copy each database
    with SQLite's online backup API into local temporary storage, then run
    `pragma quick_check`. Redact text columns of ordinary tables; virtual tables and their
    shadow tables are left alone. Finally `VACUUM` and store the result if its hash changed.
@@ -149,5 +154,9 @@ shared root files, and refuses to commit if anything else is staged.
 
 ## Compatibility
 
-`restore` also reads the layout of `codex-history` (format 2): `devices/<id>/manifest.json`
-with `transcripts/<rel>.gz` and `state/<db>.gz`. It treats those files as Codex blobs.
+Format 1 (v0.1.0) stored `.jsonl.zst` files as blobs. Format 2 readers handle both
+kinds, and the next checkpoint converts changed files.
+
+`restore` also reads the layout of the earlier `codex-history` tool, in which
+`devices/<id>/manifest.json` points to `transcripts/<rel>.gz` and `state/<db>.gz`. It
+treats those files as Codex blobs.

@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 
-from . import __version__, adapters, secrets
+from . import __version__, adapters, codec, secrets
 from .store import FORMAT, AgentStore
 from .util import (chmod_private, now, read_json, run, safe_rel, valid_device_id, write_json)
 
@@ -278,11 +278,7 @@ class Client:
                     if entry and cache.get(key) == signature and store.exists(src.rel, entry):
                         continue
                     try:
-                        if src.kind == 'jsonl':
-                            new, did = store.backup_jsonl(src.rel, src.path, entry, transform)
-                        else:
-                            new, did = store.backup_blob(src.rel, src.path, entry, transform,
-                                                         zstd_file=src.kind == 'zst')
+                        new, did = self._backup_file(store, src, entry, transform)
                     except FileNotFoundError:
                         seen.discard(src.rel)
                         continue
@@ -331,6 +327,30 @@ class Client:
         self.update_status(time=now(), device=self.device, last_checkpoint=now(), agents=summary,
                            tool_version=__version__)
         return {'device': self.device, 'committed': committed, 'agents': summary}
+
+    def _backup_file(self, store, src, entry, transform):
+        if src.kind == 'jsonl':
+            return store.backup_jsonl(src.rel, src.path, entry, transform)
+        if src.kind == 'zst':
+            # Store the decompressed lines so that a growing session only adds new chunks.
+            try:
+                plain = codec.decompress_complete(src.path.read_bytes()) if codec.available() else None
+            except (ValueError, OSError, subprocess.SubprocessError, RuntimeError):
+                plain = None
+            if plain is None:
+                return store.backup_blob(src.rel, src.path, entry, transform, raw=True)
+            tmp = self.runtime / 'tmp' / 'zst-plain.jsonl'
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_bytes(plain)
+            try:
+                new, did = store.backup_jsonl(src.rel, tmp, entry, transform)
+            finally:
+                tmp.unlink(missing_ok=True)
+            if new is not None and new.get('encoding') != 'zstd':
+                new = dict(new, encoding='zstd')
+                did = True
+            return new, did
+        return store.backup_blob(src.rel, src.path, entry, transform)
 
     def _write_device_info(self, changed):
         path = self.device_dir / 'device.json'
@@ -427,7 +447,7 @@ class Client:
                     continue
                 files = manifest.get('files', {})
                 entry['agents'][name] = {
-                    'sessions': sum(1 for r in files if adapter_session_id(adapter, r)),
+                    'sessions': len({adapter_session_id(adapter, r) for r in files} - {None}),
                     'files': len(files), 'updated_at': manifest.get('updated_at')}
             entry['this_environment'] = bool(self.cfg) and folder.name == self.cfg.get('device')
             result.append(entry)
@@ -465,12 +485,14 @@ class Client:
                 if agent:
                     raise
                 continue
+            latest = {}
             for rel, entry in sorted(manifest.get('files', {}).items()):
                 session = adapter_session_id(adapter, rel)
-                if session:
-                    result.append({'agent': name, 'session': session, 'path': rel, 'bytes': entry.get('bytes'),
-                                   'present_on_device': entry.get('present', True),
-                                   'updated_at': entry.get('updated_at')})
+                if session:  # sorted order: a later format generation of a session replaces earlier ones
+                    latest[session] = {'agent': name, 'session': session, 'path': rel, 'bytes': entry.get('bytes'),
+                                       'present_on_device': entry.get('present', True),
+                                       'updated_at': entry.get('updated_at')}
+            result.extend(latest.values())
         return result
 
     # -- restore ------------------------------------------------------------------------
@@ -513,13 +535,16 @@ class Client:
                     elif not dry_run:
                         report['index_lines_added'] += merge_index(src, dst, by_id=kind == 'id')
                     continue
+                encoded = files[rel].get('encoding') == 'zstd'
                 if dst.exists():
-                    if _sha(dst) == _sha(src):
+                    if _same(dst, src, encoded):
                         report['identical_kept'] += 1
                     else:
                         report['conflicts_kept'].append(dst_rel)
                     continue
                 if not dry_run:
+                    if encoded:
+                        src.write_bytes(codec.encode(src.read_bytes(), adapter.zstd_header_frame))
                     _copy_new(src, dst)
                 report['restored'] += 1
                 report['relocated'] += dst_rel != rel
@@ -581,6 +606,15 @@ def _superseded(rel, files):
         return False
     twin = rel[:-4] if rel.endswith('.zst') else rel + '.zst'
     return bool(files.get(twin, {}).get('present', False))
+
+
+def _same(dst: Path, src: Path, encoded: bool) -> bool:
+    if not encoded:
+        return _sha(dst) == _sha(src)
+    try:
+        return codec.decompress_complete(dst.read_bytes()) == src.read_bytes()
+    except (ValueError, OSError, subprocess.SubprocessError, RuntimeError):
+        return False
 
 
 def _sha(path: Path) -> str:

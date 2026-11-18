@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "git-agent-history"
-version = "0.1.0"
-description = "Git-backed backup, sync and restore for coding-agent conversations (Codex, Claude Code), one folder per device."
+version = "0.2.0"
+description = "Back up, sync and restore Codex, Claude Code and DeepSeek Harness conversations with one private Git repository."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [{name = "Zhicheng Zhang"}]
-keywords = ["codex", "claude-code", "ai-agents", "coding-agent", "chat-history", "session", "backup", "sync", "git", "deepseek"]
+keywords = ["codex", "claude-code", "ai-agents", "coding-agent", "chat-history", "session", "backup", "sync", "git", "deepseek", "deepseek-harness", "dsh"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

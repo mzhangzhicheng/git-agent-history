@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
 from git_agent_history import adapters, codec, secrets, service  # noqa: E402
 from git_agent_history.adapters.claude_code import encode_project_dir  # noqa: E402
+from git_agent_history.adapters.deepseek_harness import project_key  # noqa: E402
 from git_agent_history.client import Client, redact_sqlite  # noqa: E402
 from git_agent_history.util import remap_path  # noqa: E402
 
@@ -29,20 +30,23 @@ def line(obj):
 
 
 class Env:
-    """A fake machine: Codex and Claude Code homes plus a state directory."""
+    """A fake machine: Codex, Claude Code and DeepSeek Harness homes plus a state directory."""
 
     def __init__(self, root: Path, name: str, remote: Path):
         self.root = root / name
         self.codex = self.root / 'codex-home'
         self.claude = self.root / 'claude-home'
-        self.codex.mkdir(parents=True)
-        self.claude.mkdir(parents=True)
+        self.dsh = self.root / 'dsh-home'
+        for home in (self.codex, self.claude, self.dsh):
+            home.mkdir(parents=True)
         self.client = Client(self.root / 'state')
         self.name, self.remote = name, remote
 
     def init(self, **kwargs):
-        return self.client.init(str(self.remote), device=self.name, agents=['codex', 'claude-code'],
-                                homes={'codex': str(self.codex), 'claude-code': str(self.claude)},
+        return self.client.init(str(self.remote), device=self.name,
+                                agents=['codex', 'claude-code', 'deepseek-harness'],
+                                homes={'codex': str(self.codex), 'claude-code': str(self.claude),
+                                       'deepseek-harness': str(self.dsh)},
                                 trust_remote=True, **kwargs)
 
     def once(self):
@@ -279,6 +283,61 @@ class ClaudeCodeTests(Base):
         self.assertTrue(session.exists())
 
 
+@unittest.skipUnless(codec.available(), 'no zstd backend')
+class DeepSeekHarnessTests(Base):
+    """Synthetic logs in the layout of DeepSeek Harness's JSONL persistence backend."""
+
+    def make_dsh(self, env, cwd='/Users/me/proj'):
+        folder = env.dsh / 'sessions' / project_key(cwd) / 'ses~005F1'   # session id "ses_1"
+        folder.mkdir(parents=True)
+        log = folder / 'session.v3.jsonl.zstd'
+        header = {'type': 'session', 'version': 3, 'id': 'ses_1', 'createdAt': 1, 'cwd': cwd,
+                  'isSeeded': False, 'delegationDepth': 0}
+        log.write_bytes(codec.compress(json.dumps(header, separators=(',', ':')).encode() + b'\n')
+                        + codec.compress(line({'type': 'user', 'text': 'key ' + FAKE_GITHUB}).encode()))
+        (folder / 'session.lock').write_text('')
+        (env.dsh / 'config.yml').write_text('apiKey: never-backed-up')
+        return log
+
+    def test_frames_are_stored_incrementally_and_restored(self):
+        a = self.env('gpu')
+        log = self.make_dsh(a)
+        a.once()
+        with log.open('ab') as f:
+            f.write(codec.compress(line({'type': 'assistant', 'text': 'done'}).encode()))
+            f.write(codec.compress(line({'type': 'torn'}).encode())[:7])   # frame still being written
+        a.once()
+        stored = a.client.repo / 'devices/gpu/deepseek-harness'
+        manifest = json.loads((stored / 'manifest.json').read_text())
+        rel = log.relative_to(a.dsh).as_posix()
+        self.assertEqual(set(manifest['files']), {rel})                 # no lock or config files
+        self.assertEqual(len(manifest['files'][rel]['chunks']), 2)
+        self.assertEqual(manifest['files'][rel]['encoding'], 'zstd')
+
+        out = self.tmp / 'out'
+        a.client.restore('gpu', 'deepseek-harness', out)
+        data = (out / rel).read_bytes()
+        lines = codec.decompress(data).decode().splitlines()
+        self.assertEqual([json.loads(x)['type'] for x in lines], ['session', 'user', 'assistant'])
+        self.assertIn('[REDACTED:github_token]', lines[1])
+        header_frame = codec.decompress(data[:len(codec.compress(lines[0].encode() + b'\n'))])
+        self.assertEqual(json.loads(header_frame)['type'], 'session')  # header line has its own frame
+        self.assertEqual([s['session'] for s in a.client.sessions('gpu', 'deepseek-harness')], ['ses_1'])
+
+    def test_map_cwd_rewrites_header_and_folder(self):
+        a = self.env('mac')
+        log = self.make_dsh(a)
+        a.once()
+        out = self.tmp / 'linux-dsh'
+        report = a.client.restore('mac', 'deepseek-harness', out, mappings=[('/Users/me', '/home/me')])
+        self.assertEqual(report['relocated'], 1)
+        moved = out / 'sessions' / project_key('/home/me/proj') / 'ses~005F1' / log.name
+        header = json.loads(codec.decompress(moved.read_bytes()).decode().splitlines()[0])
+        self.assertEqual(header['cwd'], '/home/me/proj')
+        self.assertEqual(a.client.restore('mac', 'deepseek-harness', out,
+                                          mappings=[('/Users/me', '/home/me')])['identical_kept'], 1)
+
+
 class SyncTests(Base):
     def test_two_devices_share_one_repository(self):
         a, b = self.env('a'), self.env('b')
@@ -352,6 +411,9 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(remap_path('/a/bc', [('/a/b', '/x')]), '/a/bc')
         self.assertEqual(remap_path('C:\\work\\p', [('C:\\work', '/srv')]), '/srv/p')
         self.assertEqual(encode_project_dir('/Users/me/my.proj'), '-Users-me-my-proj')
+        self.assertEqual(project_key('/Users/me/my proj'), '--Users-me-my~0020proj--')
+        self.assertEqual(project_key('C:\\work\\p'), '--C-work-p--')
+        self.assertEqual(project_key('/'), '--root--')
 
 
 if __name__ == '__main__':

@@ -13,7 +13,8 @@ from .client import Client, describe_error
 from .secrets import MODES
 from .util import file_lock, write_json
 
-DESCRIPTION = ('Back up, sync and restore coding-agent conversation history (Codex, Claude Code, ...) '
+DESCRIPTION = ('Back up, sync and restore coding-agent conversation history (Codex, Claude Code, '
+               'DeepSeek Harness) '
                'through a private Git repository, one folder per device.')
 
 
@@ -43,6 +44,7 @@ def build_parser():
                                     ' (default: every agent whose home exists)')
     p.add_argument('--codex-home', help='Codex home (default: $CODEX_HOME or ~/.codex)')
     p.add_argument('--claude-home', help='Claude Code home (default: $CLAUDE_CONFIG_DIR or ~/.claude)')
+    p.add_argument('--dsh-home', help='DeepSeek Harness home (default: $DSH_HOME or ~/.dsh)')
     p.add_argument('--secrets', choices=MODES, default='redact',
                    help='redact known credential formats before committing (default), only count them, or off')
     p.add_argument('--create', action='store_true', help='create the private GitHub repository if missing')
@@ -86,7 +88,7 @@ def dispatch(args):
     client = Client(args.state_dir)
     action = args.action
     if action == 'init':
-        homes = {'codex': args.codex_home, 'claude-code': args.claude_home}
+        homes = {'codex': args.codex_home, 'claude-code': args.claude_home, 'deepseek-harness': args.dsh_home}
         agents = [a.strip() for a in args.agents.split(',') if a.strip()] if args.agents else None
         return client.init(args.repo, args.device, args.label, agents, {k: v for k, v in homes.items() if v},
                            args.secrets, args.offline, args.create, args.trust_remote)

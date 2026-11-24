@@ -23,6 +23,11 @@ CONFIG_VERSION = 1
 MARKER = 'git-agent-history.json'
 PROJECT_URL = 'https://github.com/mzhangzhicheng/git-agent-history'
 DEFAULTS = {'interval': 300, 'db_interval': 21600, 'secrets': 'redact', 'push': True}
+# A first backup or a new machine can move hundreds of MB, so network commands get no short
+# wall-clock limit. Git aborts a transfer that stalls below 1 KiB/s for 5 minutes instead.
+# HTTP/1.1 avoids "Error in the HTTP2 framing layer" on large pushes to GitHub.
+NETWORK_GIT_CONFIG = ('-c', 'http.version=HTTP/1.1', '-c', 'http.lowSpeedLimit=1024', '-c', 'http.lowSpeedTime=300')
+NETWORK_TIMEOUT = 6 * 3600  # last resort, e.g. for an SSH remote that hangs
 _GITHUB = re.compile(r'(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)'
                      r'([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?')
 
@@ -85,6 +90,10 @@ class Client:
     # -- basics -----------------------------------------------------------------
     def git(self, *args, **kwargs):
         return run(['git', '-C', self.repo, *args], **kwargs)
+
+    def net_git(self, *args, **kwargs):
+        """A git command in the history repository that talks to the remote (ls-remote, fetch, push)."""
+        return run(['git', *NETWORK_GIT_CONFIG, '-C', self.repo, *args], timeout=NETWORK_TIMEOUT, **kwargs)
 
     def require_config(self):
         if not self.cfg:
@@ -155,7 +164,7 @@ class Client:
                 run(['git', 'init', '-q', self.repo])
                 self.git('remote', 'add', 'origin', url)
             else:
-                run(['git', 'clone', '-q', url, self.repo], timeout=3600)
+                run(['git', *NETWORK_GIT_CONFIG, 'clone', '-q', url, self.repo], timeout=NETWORK_TIMEOUT)
         branch = 'main'
         head = self.git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD', check=False).stdout.strip()
         if head.startswith('origin/'):
@@ -389,9 +398,9 @@ class Client:
     def _integrate_remote(self):
         """Fetch the remote branch and put local commits on top. Returns False if it is empty."""
         branch = self.cfg['branch']
-        if not self.git('ls-remote', '--heads', 'origin', branch).stdout.strip():
+        if not self.net_git('ls-remote', '--heads', 'origin', branch).stdout.strip():
             return False
-        self.git('fetch', '-q', 'origin', branch)
+        self.net_git('fetch', '-q', 'origin', branch)
         if not self._has_head():
             self.git('checkout', '-q', '-B', branch, 'origin/' + branch)
             return True
@@ -412,7 +421,7 @@ class Client:
                 self.check_identity(remote=True)
             if not self._has_head():
                 return self.update_status(github='nothing to push yet')
-            pushed = self.git('push', '-q', 'origin', 'HEAD:refs/heads/' + self.cfg['branch'], check=False)
+            pushed = self.net_git('push', '-q', 'origin', 'HEAD:refs/heads/' + self.cfg['branch'], check=False)
             if pushed.returncode == 0:
                 status = read_json(self.status_file, {})
                 for key in ('error', 'message', 'last_error'):

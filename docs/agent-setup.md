@@ -20,7 +20,7 @@ with it. Do the steps yourself instead of only explaining them. Every command pr
    - Add `--create` if the repository does not exist yet.
    - Let the device ID be generated.
    - Codex, Claude Code and DeepSeek Harness are detected in their default homes. If an agent lives elsewhere, pass `--codex-home`, `--claude-home` or `--dsh-home`. Use `CODEX_HOME`, `CLAUDE_CONFIG_DIR` or `DSH_HOME` if they are set.
-5. **Run the first backup.** Run `git-agent-history once` and expect `"github": "pushed"`. Report any per-agent `errors` and the counts under `secrets_redacted`, but never the values.
+5. **Run the first backup.** Run `git-agent-history once` and expect `"github": "pushed"`. With a large history it can upload hundreds of MB and take many minutes; if your shell limits command time, run it in the background instead of letting it be killed. Report any per-agent `errors` and the counts under `secrets_redacted`, but never the values.
 6. **Keep it running.**
    - With launchd, systemd or Windows: run `git-agent-history autostart`, then `status`, and expect `worker_alive: true`.
    - In a container without systemd: run `git-agent-history start`, then `startup-command`. Tell the user exactly where to paste the printed command (the platform's start-up script), and check that the printed paths are on the persistent disk.

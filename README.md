@@ -57,6 +57,21 @@ git-agent-history restore --from-device DEVICE --agent claude-code --target ~/.c
 - Existing files are never overwritten. Add `--session ID` to restore a single conversation.
 - After restoring into a running agent's home, restart the agent.
 
+## Hand off tasks between agents
+
+Agents on different machines can pass work to each other through the same private repository.
+For example, Claude Code on your laptop can hand a task to Codex in a cloud container. Each task
+has a spec (goal, acceptance criteria, roles, context) and a log, and it records whose turn it is.
+
+```sh
+git-agent-history handoff new --title "Add login API" --from claude-code --to codex --file spec.md
+git-agent-history handoff list --for codex                  # on the other machine
+git-agent-history handoff show TASK --markdown
+git-agent-history handoff post TASK --from codex --to claude-code --status review -m "Tests added on branch login"
+```
+
+Writes are pushed right away. See [docs/handoff.md](docs/handoff.md) for the model and for instructions to give your agents.
+
 ## Supported agents
 
 | Agent | What is backed up |
@@ -80,7 +95,7 @@ Credentials, settings, plugins, attachments and project code are **not** backed 
 - [agentctxsync](https://github.com/westsource/agentctxsync) is a self-hosted server that shares one session pool between agents.
 - [cli-continues](https://github.com/yigitkonur/cli-continues) and [cross_agent_session_resumer](https://github.com/Dicklesworthstone/cross_agent_session_resumer) hand a session over to another agent.
 
-This project does one thing: back up every agent session on every machine, and it needs nothing but a private Git repository.
+This project backs up every agent session on every machine and lets agents on different machines hand work to each other. It needs nothing but a private Git repository.
 
 See [docs/design.md](docs/design.md) for details.
 

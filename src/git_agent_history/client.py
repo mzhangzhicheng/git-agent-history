@@ -373,7 +373,7 @@ class Client:
             info['updated_at'] = now()
             write_json(path, info)
 
-    def _commit(self):
+    def _commit(self, message=None):
         for name, content in ((MARKER, '{\n  "format": %d,\n  "tool": "git-agent-history",\n  "url": "%s"\n}\n'
                                % (FORMAT, PROJECT_URL)),
                               ('README.md', VAULT_README), ('.gitattributes', '* -text\n')):
@@ -388,7 +388,7 @@ class Client:
             raise ValueError('Unrelated staged files in the history repository; refusing to commit')
         if not staged:
             return False
-        self.git('commit', '-q', '-m', 'Backup %s %s' % (self.device, now()))
+        self.git('commit', '-q', '-m', message or 'Backup %s %s' % (self.device, now()))
         return True
 
     # -- sync ---------------------------------------------------------------------------

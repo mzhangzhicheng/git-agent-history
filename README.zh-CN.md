@@ -54,6 +54,20 @@ git-agent-history restore --from-device 设备ID --agent claude-code --target ~/
 - 已有文件不会被覆盖；只恢复一个会话可以加 `--session 会话ID`。
 - 恢复到正在运行的 Agent 目录后，重启一下 Agent 即可看到。
 
+## 在 Agent 之间交接任务
+
+不同机器上的 Agent 可以通过同一个私有仓库互相交接工作，比如本机的 Claude Code 把任务交给云端容器里的 Codex。
+每个任务有一份 spec（目标、验收标准、分工、上下文）和一份交接记录，并标明现在轮到谁。
+
+```sh
+git-agent-history handoff new --title "登录接口" --from claude-code --to codex --file spec.md
+git-agent-history handoff list --for codex                  # 在另一台机器上
+git-agent-history handoff show 任务ID --markdown
+git-agent-history handoff post 任务ID --from codex --to claude-code --status review -m "测试已写好，在 login 分支"
+```
+
+写入会立即推送。模型说明和给 Agent 的使用说明见 [docs/handoff.md](docs/handoff.md)。
+
 ## 支持的 Agent
 
 | Agent | 备份的内容 |
@@ -77,7 +91,7 @@ git-agent-history restore --from-device 设备ID --agent claude-code --target ~/
 - [agentctxsync](https://github.com/westsource/agentctxsync)：自建服务端，多个 Agent 共享会话池。
 - [cli-continues](https://github.com/yigitkonur/cli-continues)、[cross_agent_session_resumer](https://github.com/Dicklesworthstone/cross_agent_session_resumer)：把会话交给另一个 Agent 继续。
 
-本项目只做一件事：多 Agent、多设备的整机备份，除了一个私有 Git 仓库之外什么都不需要。
+本项目做两件事：多 Agent、多设备的整机备份，以及让不同机器上的 Agent 互相交接任务。除了一个私有 Git 仓库之外什么都不需要。
 
 更多细节见 [设计说明](docs/design.md)。
 

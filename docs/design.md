@@ -39,7 +39,13 @@ devices/<device-id>/<agent>/manifest.json
 devices/<device-id>/<agent>/files/<rel>.chunks/gGGG-NNNNN.gz   append-only JSONL chunks
 devices/<device-id>/<agent>/files/<rel>.gz                     whole-file blobs
 devices/<device-id>/<agent>/databases/<name>.gz                SQLite snapshots
+devices/<device-id>/handoff/<task-id>/<stamp>-<participant>.md handoff entries (see docs/handoff.md)
 ```
+
+Handoff entries are immutable Markdown files with a small front matter. Like everything else,
+they live in the writer's own device folder. Readers merge entries with the same task ID across
+devices, ordered by the UTC stamp in the file name. They are not part of the manifest, so older
+versions of the tool ignore them, and the storage `format` stays 2.
 
 `<rel>` is the file's POSIX path relative to the agent home, for example
 `sessions/2026/11/17/rollout-…-<uuid>.jsonl` or `projects/-Users-me-code/<uuid>.jsonl`.

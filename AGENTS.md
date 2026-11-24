@@ -7,6 +7,7 @@
   - `store.py`: the chunk and blob format.
   - `secrets.py`: redaction.
   - `service.py`: background worker and autostart.
+  - `handoff.py`: tasks passed between agents and devices ([docs/handoff.md](docs/handoff.md)).
   - `adapters/`: one module per agent.
 - **Runtime.** Python 3.9+ standard library only; no third-party runtime dependencies. Code must run on Linux, macOS and Windows.
 - **Tests.** Run `python3 -m unittest discover -s tests -v`. They must stay offline and use temporary folders, a local bare repository and synthetic transcripts. Never commit real conversation history. Build token-like test strings at runtime so that the source contains no credential-shaped literals.

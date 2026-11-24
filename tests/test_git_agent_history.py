@@ -1,5 +1,7 @@
 """Offline tests: temporary agent homes, a local bare Git remote and synthetic transcripts."""
+import contextlib
 import gzip
+import io
 import json
 import os
 from pathlib import Path
@@ -12,7 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
-from git_agent_history import adapters, codec, secrets, service  # noqa: E402
+from git_agent_history import adapters, cli, codec, handoff, secrets, service  # noqa: E402
 from git_agent_history.adapters.claude_code import encode_project_dir  # noqa: E402
 from git_agent_history.adapters.deepseek_harness import project_key  # noqa: E402
 from git_agent_history.client import Client, redact_sqlite  # noqa: E402
@@ -405,6 +407,72 @@ class SyncTests(Base):
         c = self.env('t', init=False)
         with self.assertRaises(ValueError):
             c.client.init(str(self.remote), device='t', agents=['claude-code'], homes={'claude-code': str(c.claude)})
+
+
+class HandoffTests(Base):
+    def test_task_passes_between_devices(self):
+        mac, dsw = self.env('mac'), self.env('dsw')
+        made = handoff.new(mac.client, 'Add login API', 'claude-code', 'codex',
+                           'Goal: add /login.\nToken for CI: ' + FAKE_GITHUB)
+        task = made['task']
+        self.assertRegex(task, r'^\d{8}-add-login-api-[0-9a-f]{4}$')
+        self.assertEqual((made['sync']['github'], made['secrets_redacted']), ('pushed', {'github_token': 1}))
+
+        self.assertEqual([t['task'] for t in handoff.list_tasks(dsw.client, for_agent='codex')['tasks']], [task])
+        self.assertEqual(handoff.list_tasks(dsw.client, for_agent='claude-code')['tasks'], [])
+        handoff.post(dsw.client, task, 'codex', 'Tests added; please review.', to='claude-code', status='review')
+
+        shown = handoff.show(mac.client, task)
+        self.assertEqual((shown['next'], shown['status'], shown['entries']), ('claude-code', 'review', 2))
+        self.assertIn('Goal: add /login.', shown['spec'])
+        self.assertNotIn(FAKE_GITHUB, shown['spec'])
+        self.assertEqual([(e['from'], e['device']) for e in shown['log']], [('claude-code', 'mac'), ('codex', 'dsw')])
+        handoff.post(mac.client, task, 'claude-code', 'Merged.', to='human', status='done')
+        self.assertEqual(handoff.list_tasks(dsw.client)['tasks'], [])
+        self.assertEqual(len(handoff.list_tasks(dsw.client, include_done=True)['tasks']), 1)
+
+        (mac.claude / 'history.jsonl').write_text(line({'x': 1}))
+        mac.once()                          # backups keep working next to handoffs
+        tree = subprocess.run(['git', '--git-dir', str(self.remote), 'ls-tree', '-r', '--name-only', 'main'],
+                              capture_output=True, text=True, check=True).stdout.split()
+        entries = [p for p in tree if '/handoff/' in p]
+        self.assertEqual(len(entries), 3)
+        for path in entries:                # each device wrote only into its own folder
+            self.assertTrue(path.startswith('devices/mac/handoff/%s/' % task) and path.endswith('-claude-code.md')
+                            or path.startswith('devices/dsw/handoff/%s/' % task) and path.endswith('-codex.md'), path)
+
+    def test_spec_updates_and_markdown(self):
+        mac = self.env('mac')
+        task = handoff.new(mac.client, '整理实验结果', 'human', 'claude-code')['task']
+        self.assertRegex(task, r'^\d{8}-[0-9a-f]{4}$')
+        self.assertIn('## Acceptance criteria', handoff.show(mac.client, task)['spec'])   # template
+        handoff.post(mac.client, task, 'claude-code', 'Compare runs A and B.', spec=True)
+        shown = handoff.show(mac.client, task)
+        self.assertEqual((shown['spec'], shown['spec_by']), ('Compare runs A and B.\n', 'claude-code'))
+        text = handoff.render(shown)
+        self.assertTrue(text.startswith('# 整理实验结果\n'))
+        self.assertIn('spec updated on mac', text)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.main(['--state-dir', str(mac.client.state), 'handoff', 'show', task, '--markdown'])
+        self.assertTrue(out.getvalue().startswith('# 整理实验结果\n'))
+
+    def test_bad_input_and_foreign_files_are_rejected(self):
+        mac = self.env('mac')
+        with self.assertRaises(ValueError):
+            handoff.post(mac.client, 'no-such-task', 'codex', 'hello')
+        with self.assertRaises(ValueError):
+            handoff.new(mac.client, 'x', 'codex', 'human', task='../evil')
+        task = handoff.new(mac.client, 'x', 'codex', 'human', 'spec')['task']
+        with self.assertRaises(ValueError):
+            handoff.new(mac.client, 'x', 'codex', 'human', 'spec', task=task)
+        with self.assertRaises(ValueError):
+            handoff.post(mac.client, task, 'codex', '   ')
+        folder = mac.client.repo / 'devices/mac/handoff' / task
+        (folder / 'notes.txt').write_text('not an entry')
+        (folder / '20990101T000000000000Z-codex.md').write_text('---\ntask: other-task\n---\nwrong task')
+        shown = handoff.show(mac.client, task)
+        self.assertEqual((shown['entries'], shown['skipped_entries'], shown['next']), (1, 2, 'human'))
 
 
 class UnitTests(unittest.TestCase):

@@ -8,10 +8,29 @@ import sqlite3
 import subprocess
 import sys
 
-from . import __version__, adapters, service
+from . import __version__, adapters, handoff, service
 from .client import Client, describe_error
 from .secrets import MODES
 from .util import file_lock, write_json
+
+
+class _Text(str):
+    """A result printed as plain text instead of JSON."""
+
+
+def _body_args(parser, required=False):
+    group = parser.add_mutually_exclusive_group(required=required)
+    group.add_argument('--message', '-m', help='the text (Markdown)')
+    group.add_argument('--file', help='read the text from a file, or from standard input with -')
+
+
+def _body(args):
+    if args.file == '-':
+        return sys.stdin.read()
+    if args.file:
+        with open(args.file, encoding='utf-8') as f:
+            return f.read()
+    return args.message
 
 DESCRIPTION = ('Back up, sync and restore coding-agent conversation history (Codex, Claude Code, '
                'DeepSeek Harness) '
@@ -81,7 +100,43 @@ def build_parser():
         p.add_argument('--map-cwd', action='append', default=[], metavar='OLD=NEW',
                        help='rewrite project paths that moved (repeatable)')
         p.add_argument('--dry-run', action='store_true')
+
+    p = sub.add_parser('handoff', help='pass tasks and context between agents and devices')
+    hs = p.add_subparsers(dest='handoff_action', metavar='subcommand')
+    hs.required = True
+    participants = list(handoff.PARTICIPANTS)
+    q = hs.add_parser('new', help='start a task; the text is its spec (default: a template to fill in)')
+    q.add_argument('--title', required=True)
+    q.add_argument('--from', dest='sender', required=True, choices=participants)
+    q.add_argument('--to', required=True, choices=participants, help='who works on it first')
+    q.add_argument('--id', dest='task', help='task ID (default: date, title and a random suffix)')
+    _body_args(q)
+    q = hs.add_parser('post', help='add a note, or a new spec, to a task and optionally pass the turn')
+    q.add_argument('task')
+    q.add_argument('--from', dest='sender', required=True, choices=participants)
+    q.add_argument('--to', choices=participants, help='whose turn it is next (default: unchanged)')
+    q.add_argument('--status', choices=handoff.STATUSES, help='new status (default: unchanged)')
+    q.add_argument('--spec', action='store_true', help="the text replaces the task's spec")
+    _body_args(q, required=True)
+    q = hs.add_parser('list', help='list tasks from all devices, most recently updated first')
+    q.add_argument('--for', dest='for_agent', choices=participants, help='only tasks whose turn is theirs')
+    q.add_argument('--all', action='store_true', help='include done tasks')
+    q = hs.add_parser('show', help="show a task's spec and log")
+    q.add_argument('task')
+    q.add_argument('--markdown', action='store_true', help='print readable Markdown instead of JSON')
     return parser
+
+
+def _handoff(client, args):
+    action = args.handoff_action
+    if action == 'new':
+        return handoff.new(client, args.title, args.sender, args.to, _body(args), args.task)
+    if action == 'post':
+        return handoff.post(client, args.task, args.sender, _body(args), args.to, args.status, args.spec)
+    if action == 'list':
+        return handoff.list_tasks(client, args.for_agent, args.all)
+    result = handoff.show(client, args.task)
+    return _Text(handoff.render(result)) if args.markdown else result
 
 
 def dispatch(args):
@@ -123,6 +178,8 @@ def dispatch(args):
             return client.pull()
     if action == 'scan':
         return client.scan()
+    if action == 'handoff':
+        return _handoff(client, args)
     if action == 'connect':
         client.verify_private()
         client.cfg['push'] = True
@@ -143,7 +200,9 @@ def main(argv=None):
     except (ValueError, OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
         print(describe_error(exc), file=sys.stderr)
         sys.exit(1)
-    if result is not None:
+    if isinstance(result, _Text):
+        print(result)
+    elif result is not None:
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Handoffs between agents.** The new `handoff new|post|list|show` commands pass tasks between agents on different machines, for example Claude Code on a laptop and Codex in a cloud container. Each task has a spec, a log and a record of whose turn it is. Entries are immutable Markdown files in each device's own folder, redacted like the history and pushed right away. See [docs/handoff.md](docs/handoff.md).
 - **Large first backups now upload.** `git push`, `fetch`, `ls-remote` and `clone` no longer stop after a fixed 5 minutes (1 hour for `clone`), which made a first backup of several hundred MB fail on every retry. Git now aborts only a transfer that stalls below 1 KiB/s for 5 minutes, with a 6-hour ceiling.
 - These commands use HTTP/1.1, which avoids `Error in the HTTP2 framing layer` on large pushes to GitHub.
 

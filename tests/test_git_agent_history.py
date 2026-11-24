@@ -376,6 +376,31 @@ class SyncTests(Base):
         with self.assertRaises(ValueError):
             a.client.restore('evil', 'claude-code', self.tmp / 'out')
 
+    def test_network_commands_tolerate_slow_large_transfers(self):
+        from git_agent_history import client as client_module
+        real_run, calls = client_module.run, []
+
+        def recording_run(args, **kwargs):
+            calls.append(([str(x) for x in args], kwargs.get('timeout')))
+            return real_run(args, **kwargs)
+
+        with mock.patch.object(client_module, 'run', side_effect=recording_run):
+            a = self.env('net')                 # clone
+            (a.claude / 'history.jsonl').write_text(line({'x': 1}))
+            a.once()                            # ls-remote, push
+            (a.claude / 'history.jsonl').write_text(line({'x': 1}) + line({'x': 2}))
+            a.once()                            # ls-remote, fetch, push
+        seen = set()
+        for args, timeout in calls:
+            verb = next((v for v in ('clone', 'ls-remote', 'fetch', 'push') if v in args), None)
+            if args[0] != 'git' or verb is None:
+                continue
+            seen.add(verb)
+            self.assertIn('http.version=HTTP/1.1', args, verb)
+            self.assertIn('http.lowSpeedTime=300', args, verb)
+            self.assertGreaterEqual(timeout, 3600, verb)
+        self.assertEqual(seen, {'clone', 'ls-remote', 'fetch', 'push'})
+
     def test_non_github_remote_needs_explicit_trust(self):
         c = self.env('t', init=False)
         with self.assertRaises(ValueError):

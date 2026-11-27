@@ -7,6 +7,7 @@ See docs/design.md for the manifest format.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import os
 from pathlib import Path
@@ -14,13 +15,14 @@ import re
 import shutil
 import tempfile
 
-from . import secrets
+from . import codec, secrets
 from .util import (MAX_CHUNK_PLAINTEXT, READ_SIZE, file_range, gzip_read_into, gzip_write, now,
                    read_json, safe_rel, sha256_bytes, write_json)
 
 FORMAT = 2  # 2: compressed transcripts are stored as plaintext chunks (encoding: zstd)
 MAX_BLOB_SOURCE = 512 * 1024 * 1024
 _CHUNK_NAME = re.compile(r'g[0-9]{3,6}-[0-9]{5}\.gz')
+_ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
 
 
 class AgentStore:
@@ -178,6 +180,34 @@ class AgentStore:
                 gzip_read_into(self._blob_path(rel, entry), out, whole)
         if whole.hexdigest() != entry['sha256']:
             raise ValueError('Checksum mismatch in ' + rel)
+
+    def iter_lines(self, rel: str, entry: dict, start_chunk: int = 0):
+        """Yield the stored lines of a file without their newline, from chunk `start_chunk` on.
+
+        Reads transcripts without rebuilding them on disk. Checksums are not verified here;
+        `materialize` does that for restores. A blob that holds raw Zstandard data (format 1,
+        or no decoder at backup time) is decompressed if a backend is available.
+        """
+        if entry.get('kind') == 'jsonl':
+            pending = b''
+            for chunk in entry.get('chunks', [])[start_chunk:]:
+                if not _CHUNK_NAME.fullmatch(chunk.get('name', '')):
+                    raise ValueError('Unsafe chunk name in manifest')
+                with gzip.open(self._chunk_dir(rel) / chunk['name'], 'rb') as f:
+                    for block in iter(lambda: f.read(READ_SIZE), b''):
+                        lines = (pending + block).split(b'\n')
+                        pending = lines.pop()
+                        yield from lines
+            if pending:
+                yield pending
+            return
+        with gzip.open(self._blob_path(rel, entry), 'rb') as f:
+            data = f.read()
+        if data[:4] == _ZSTD_MAGIC:
+            if not codec.available():
+                return
+            data = codec.decompress_complete(data)
+        yield from data.split(b'\n')
 
     def materialize_database(self, name: str, entry: dict, dst: Path) -> None:
         digest = hashlib.sha256()

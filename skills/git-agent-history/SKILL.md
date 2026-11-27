@@ -32,7 +32,12 @@ git-agent-history init --repo OWNER/NAME --label "my laptop"
 git-agent-history once && git-agent-history start && git-agent-history status
 git-agent-history pull && git-agent-history devices
 git-agent-history restore --from-device ID --agent codex|claude-code|deepseek-harness --target PATH [--map-cwd OLD=NEW] [--session ID] [--dry-run]
+git-agent-history prompts [--grep TEXT] [--since YYYY-MM-DD] [--device ID] [--agent NAME] [--session ID] [--markdown]
 ```
+
+When the user wants to find or review something they asked an agent earlier, run `pull`, then
+`prompts --grep`. Each device's full list is also in `devices/<id>/prompts/README.md` of the
+history repository (see `docs/prompts.md`).
 
 ## Handoffs
 

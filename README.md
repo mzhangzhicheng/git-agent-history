@@ -57,6 +57,18 @@ git-agent-history restore --from-device DEVICE --agent claude-code --target ~/.c
 - Existing files are never overwritten. Add `--session ID` to restore a single conversation.
 - After restoring into a running agent's home, restart the agent.
 
+## Read every prompt you typed
+
+After each backup, every machine rewrites a readable list of the prompts typed on it, by month, in
+`devices/<device-id>/prompts/README.md` of the history repository. Open it on GitHub. To search
+across all machines:
+
+```sh
+git-agent-history pull && git-agent-history prompts --grep "login" --markdown
+```
+
+See [docs/prompts.md](docs/prompts.md) for what counts as a prompt and the search options.
+
 ## Hand off tasks between agents
 
 Agents on different machines can pass work to each other through the same private repository.

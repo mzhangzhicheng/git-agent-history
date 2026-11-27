@@ -66,6 +66,36 @@ class DeepSeekHarnessAdapter(Adapter):
         exe = exe.lower()
         return exe in ('dsh', 'dsh.exe') or '@deepseek-ai/dsh' in args
 
+    # Best effort: the record layout has not been checked against real logs yet. A prompt is a
+    # record with type or role "user" whose text is not a tool result.
+    prompt_markers = (b'"user"', b'"session"')
+
+    def prompt_file(self, rel: str) -> bool:
+        return self.session_id(rel) is not None
+
+    def prompt(self, record, state):
+        if record.get('type') == 'session':
+            if isinstance(record.get('cwd'), str):
+                state['cwd'] = record['cwd']
+            return None
+        message = record.get('message') if isinstance(record.get('message'), dict) else {}
+        if 'user' not in (record.get('type'), record.get('role'), message.get('role')):
+            return None
+        content = next((v for v in (record.get('text'), record.get('content'), message.get('content'))
+                        if v is not None), None)
+        texts = [content] if isinstance(content, str) else []
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict):
+                if block.get('type') in ('tool_result', 'tool-result'):
+                    return None
+                if isinstance(block.get('text'), str):
+                    texts.append(block['text'])
+        text = '\n\n'.join(texts).strip()
+        if not text:
+            return None
+        when = next((record.get(k) for k in ('timestamp', 'createdAt', 'time', 'ts') if record.get(k)), None)
+        return {'time': when, 'text': text, 'session': state.get('session'), 'cwd': state.get('cwd')}
+
     def target_paths(self, staged: Path, rels, mappings):
         """Rewrite each session header's cwd and move the session to the matching project folder."""
         result = {rel: rel for rel in rels}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path, PurePosixPath
+import re
 
 from ..util import running_processes
 
@@ -56,6 +57,33 @@ class Adapter:
     def has_transcripts(self, home: Path) -> bool:
         return any(s.kind in ('jsonl', 'zst') and self.index_kind(s.rel) is None
                    for s in self.sources(home))
+
+    # -- prompt list (docs/prompts.md) -----------------------------------------------
+    # Only lines that contain one of these byte strings are parsed; an empty tuple parses all.
+    prompt_markers = ()
+
+    def prompt_file(self, rel: str) -> bool:
+        """Whether a stored file is a main conversation whose user prompts are listed."""
+        return False
+
+    def prompt(self, record: dict, state: dict):
+        """The prompt the user typed in one transcript record, or None.
+
+        Returns a dict with `text` and optionally `time`, `session`, `cwd`, `images`, `files`
+        and `source`. If a file yields prompts from several sources, only those of the first
+        one in `prompt_sources` are kept. `state` lives for one file and starts as
+        {'session': session_id(rel)}; use it for values such as the session's cwd.
+        """
+        return None
+
+    prompt_sources = ()
+
+
+def strip_blocks(text: str, tags) -> str:
+    """Remove <tag ...>...</tag> blocks that an agent wraps around a prompt as context."""
+    for tag in tags:
+        text = re.sub(r'<%s(?:\s[^>]*)?>.*?</%s>' % (re.escape(tag), re.escape(tag)), '', text, flags=re.S)
+    return text.strip()
 
 
 def walk_files(root: Path):

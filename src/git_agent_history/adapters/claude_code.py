@@ -15,9 +15,16 @@ from pathlib import Path, PurePosixPath
 import re
 
 from ..util import remap_path
-from .base import Adapter, Source, walk_files
+from .base import Adapter, Source, strip_blocks, walk_files
 
 _BLOB_DIRS = {'subagents': ('.json',), 'tool-results': ('.txt', '.json')}
+# Context that Claude Code and its IDE extensions add to a prompt; the user did not type it.
+_CONTEXT_TAGS = ('ide_opened_file', 'ide_selection', 'ide_diagnostics', 'system-reminder')
+# Records of type "user" that the user did not type.
+_NOT_TYPED = ('[Request interrupted by user', '<task-notification>', '<local-command-stdout>',
+              '<local-command-stderr>', '<local-command-caveat>', '<bash-stdout>', '<bash-stderr>')
+_COMMAND = re.compile(r'<command-name>(.*?)</command-name>', re.S)
+_COMMAND_ARGS = re.compile(r'<command-args>(.*?)</command-args>', re.S)
 
 
 def encode_project_dir(cwd: str) -> str:
@@ -73,6 +80,49 @@ class ClaudeCodeAdapter(Adapter):
     def is_running_process(self, exe: str, args: str) -> bool:
         exe = exe.lower()
         return exe in ('claude', 'claude.exe') or '@anthropic-ai/claude-code' in args
+
+    # A typed prompt is a "user" record without tool results. Newer versions mark it with
+    # origin.kind == "human"; meta records, compaction summaries and subagents are skipped.
+    # Forked and resumed sessions copy earlier prompts; the prompt list removes duplicates.
+    prompt_markers = (b'"user"',)
+
+    def prompt_file(self, rel: str) -> bool:
+        return self.session_id(rel) is not None
+
+    def prompt(self, record, state):
+        if record.get('type') != 'user' or 'toolUseResult' in record:
+            return None
+        if any(record.get(k) for k in ('isMeta', 'isSidechain', 'isCompactSummary', 'isVisibleInTranscriptOnly')):
+            return None
+        origin = record.get('origin')
+        if isinstance(origin, dict) and origin.get('kind') not in (None, 'human'):
+            return None
+        if record.get('promptSource') == 'system':
+            return None
+        content = record.get('message', {}).get('content') if isinstance(record.get('message'), dict) else None
+        texts, images = [], 0
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                kind = block.get('type') if isinstance(block, dict) else None
+                if kind == 'tool_result':
+                    return None
+                if kind == 'text' and isinstance(block.get('text'), str):
+                    texts.append(block['text'])
+                elif kind == 'image':
+                    images += 1
+        else:
+            return None
+        text = strip_blocks('\n\n'.join(texts), _CONTEXT_TAGS)
+        command = _COMMAND.search(text)
+        if command:                                   # a slash command such as /model
+            args = _COMMAND_ARGS.search(text)
+            text = (command.group(1).strip() + ' ' + (args.group(1).strip() if args else '')).strip()
+        if text.startswith(_NOT_TYPED) or not (text or images):
+            return None
+        return {'time': record.get('timestamp'), 'text': text, 'session': state.get('session'),
+                'cwd': record.get('cwd'), 'images': images}
 
     @staticmethod
     def _cwd_of(path: Path):

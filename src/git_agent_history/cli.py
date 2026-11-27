@@ -8,7 +8,7 @@ import sqlite3
 import subprocess
 import sys
 
-from . import __version__, adapters, handoff, service
+from . import __version__, adapters, handoff, prompts, service
 from .client import Client, describe_error
 from .secrets import MODES
 from .util import file_lock, write_json
@@ -88,6 +88,15 @@ def build_parser():
     p.add_argument('--device', help='device ID (default: this environment)')
     p.add_argument('--agent', choices=sorted(adapters.ADAPTERS))
 
+    p = sub.add_parser('prompts', help='search the prompts you typed, on every device, newest first')
+    p.add_argument('--device', help='only this device ID (default: every device; run `pull` first)')
+    p.add_argument('--agent', choices=sorted(adapters.ADAPTERS))
+    p.add_argument('--session', help='only this session (an ID prefix is enough)')
+    p.add_argument('--since', metavar='YYYY-MM-DD', help='only prompts from this local date on')
+    p.add_argument('--grep', metavar='TEXT', help='only prompts containing TEXT (ignores case)')
+    p.add_argument('--limit', type=int, default=50, help='at most N prompts; 0 for all (default: 50)')
+    p.add_argument('--markdown', action='store_true', help='print readable Markdown instead of JSON')
+
     for name, text in (('restore', 'restore a device\'s history into an agent home'),
                        ('export', 'same as restore; use it to unpack into a separate folder')):
         p = sub.add_parser(name, help=text)
@@ -156,6 +165,11 @@ def dispatch(args):
     client.require_config()
     if action == 'sessions':
         return client.sessions(args.device or client.device, args.agent)
+    if action == 'prompts':
+        with file_lock(client.runtime / 'write.lock', wait=True):
+            result = prompts.query(client, args.device, args.agent, args.session, args.since, args.grep,
+                                   args.limit, args.markdown)
+        return _Text(result.rstrip('\n')) if args.markdown else result
     if action == 'once':
         return service.once(client)
     if action == 'run':

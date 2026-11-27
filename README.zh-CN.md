@@ -54,6 +54,17 @@ git-agent-history restore --from-device 设备ID --agent claude-code --target ~/
 - 已有文件不会被覆盖；只恢复一个会话可以加 `--session 会话ID`。
 - 恢复到正在运行的 Agent 目录后，重启一下 Agent 即可看到。
 
+## 查看你输入过的所有 prompt
+
+每次备份后，每台机器都会把在它上面输入过的 prompt 整理成一份按月分页的可读列表，放在历史仓库的
+`devices/设备ID/prompts/README.md`，在 GitHub 上直接打开即可。要跨所有机器搜索：
+
+```sh
+git-agent-history pull && git-agent-history prompts --grep "登录" --markdown
+```
+
+哪些内容算作 prompt、以及搜索选项，见 [docs/prompts.md](docs/prompts.md)。
+
 ## 在 Agent 之间交接任务
 
 不同机器上的 Agent 可以通过同一个私有仓库互相交接工作，比如本机的 Claude Code 把任务交给云端容器里的 Codex。

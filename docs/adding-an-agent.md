@@ -36,6 +36,8 @@ Create `src/git_agent_history/adapters/<agent>.py` with a subclass of `Adapter`
 | `is_running_process(exe, args)` | Detects a running agent, so that restores into its live home stay safe. |
 | `target_paths(staged, rels, mappings)` | Optional. Remaps restore paths, for example when folders are named after the project path. |
 | `databases(home)`, `valid_database_name`, `rewrite_database` | Optional. SQLite files to snapshot and how to fix paths in them after restore. |
+| `prompt_file(rel)`, `prompt(record, state)` | Optional. Which stored files are main conversations, and the prompt the user typed in one JSON record (see [prompts.md](prompts.md)). Leave out context the agent or an IDE adds. |
+| `prompt_markers`, `prompt_sources` | Optional. Byte strings a record line must contain to be parsed at all (a fast pre-filter), and the preferred order of prompt sources if one file records the same prompt more than once. |
 
 If an agent keeps conversations only inside a database, snapshot the database and treat
 a restore with `--with-database` as the main path. Explain the limits in the README.

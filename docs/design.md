@@ -40,7 +40,12 @@ devices/<device-id>/<agent>/files/<rel>.chunks/gGGG-NNNNN.gz   append-only JSONL
 devices/<device-id>/<agent>/files/<rel>.gz                     whole-file blobs
 devices/<device-id>/<agent>/databases/<name>.gz                SQLite snapshots
 devices/<device-id>/handoff/<task-id>/<stamp>-<participant>.md handoff entries (see docs/handoff.md)
+devices/<device-id>/prompts/README.md, <YYYY-MM>.md             generated prompt list (see docs/prompts.md)
 ```
+
+The prompt list is derived from the device's own stored transcripts after each checkpoint and
+rewritten only when its content changes. Like handoffs, it is not part of the manifest, so the
+storage `format` stays 2.
 
 Handoff entries are immutable Markdown files with a small front matter. Like everything else,
 they live in the writer's own device folder. Readers merge entries with the same task ID across

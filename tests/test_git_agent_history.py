@@ -1,5 +1,6 @@
 """Offline tests: temporary agent homes, a local bare Git remote and synthetic transcripts."""
 import contextlib
+import datetime
 import gzip
 import io
 import json
@@ -14,10 +15,11 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
-from git_agent_history import adapters, cli, codec, handoff, secrets, service  # noqa: E402
+from git_agent_history import adapters, cli, codec, handoff, prompts, secrets, service  # noqa: E402
 from git_agent_history.adapters.claude_code import encode_project_dir  # noqa: E402
 from git_agent_history.adapters.deepseek_harness import project_key  # noqa: E402
 from git_agent_history.client import Client, redact_sqlite  # noqa: E402
+from git_agent_history.store import AgentStore  # noqa: E402
 from git_agent_history.util import remap_path  # noqa: E402
 
 # Built at runtime so that the repository itself never contains token-shaped strings.
@@ -473,6 +475,193 @@ class HandoffTests(Base):
         (folder / '20990101T000000000000Z-codex.md').write_text('---\ntask: other-task\n---\nwrong task')
         shown = handoff.show(mac.client, task)
         self.assertEqual((shown['entries'], shown['skipped_entries'], shown['next']), (1, 2, 'human'))
+
+
+class PromptTests(Base):
+    """The prompt files in devices/<id>/prompts/ and the `prompts` command (docs/prompts.md)."""
+
+    def claude_session(self, env, uuid, records, cwd='/Users/me/proj'):
+        path = env.claude / 'projects' / encode_project_dir(cwd) / (uuid + '.jsonl')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('a', encoding='utf-8') as f:
+            f.write(''.join(line(r) for r in records))
+        return path
+
+    @staticmethod
+    def typed(content, when, **extra):
+        record = {'type': 'user', 'timestamp': when, 'sessionId': UUID_B, 'cwd': '/Users/me/proj',
+                  'origin': {'kind': 'human'}, 'message': {'role': 'user', 'content': content}}
+        record.update(extra)
+        return record
+
+    def test_claude_prompts_are_cleaned_deduplicated_and_committed(self):
+        a = self.env('mac')
+        first = self.typed([{'type': 'text', 'text': '<ide_opened_file>The user opened x.py</ide_opened_file>'},
+                            {'type': 'text', 'text': 'Fix the <b>bug</b>, token ' + FAKE_GITHUB}],
+                           '2026-11-20T01:02:03.456Z')
+        session = self.claude_session(a, UUID_B, [
+            first,
+            {'type': 'user', 'timestamp': '2026-11-20T01:02:05Z', 'toolUseResult': {},
+             'message': {'content': [{'type': 'tool_result', 'content': 'output'}]}},
+            {'type': 'user', 'isMeta': True, 'timestamp': '2026-11-20T01:02:06Z', 'message': {'content': 'meta'}},
+            {'type': 'user', 'isCompactSummary': True, 'timestamp': '2026-11-20T01:03:00Z',
+             'message': {'content': 'This session is being continued'}},
+            self.typed('<task-notification>done</task-notification>', '2026-11-20T01:04:00Z',
+                       origin={'kind': 'task-notification'}),
+            {'type': 'user', 'timestamp': '2026-11-20T01:04:30Z',
+             'message': {'content': [{'type': 'text', 'text': '[Request interrupted by user]'}]}},
+            self.typed('<command-name>/model</command-name>\n<command-message>model</command-message>\n'
+                       '<command-args>opus</command-args>', '2026-11-20T01:05:00Z'),
+            {'type': 'assistant', 'timestamp': '2026-11-20T01:05:01Z', 'message': {'content': 'ok'}},
+        ])
+        self.claude_session(a, UUID_A, [first])                  # a forked session copies the prompt
+        sub = session.parent / UUID_B / 'subagents'
+        sub.mkdir(parents=True)
+        (sub / 'agent-1.jsonl').write_text(line(self.typed('task for a subagent', '2026-11-20T01:06:00Z')))
+
+        result = a.once()
+        self.assertEqual(result['prompt_docs'], {'prompts': 2, 'files': 2, 'written': ['2026-11.md', 'README.md']})
+        texts = [p['text'] for p in prompts.query(a.client, limit=0)['prompts']]
+        self.assertEqual(texts, ['/model opus', 'Fix the <b>bug</b>, token [REDACTED:github_token]'])
+        tree = subprocess.run(['git', '--git-dir', str(self.remote), 'ls-tree', '-r', '--name-only', 'main'],
+                              capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual([p for p in tree if '/prompts/' in p],
+                         ['devices/mac/prompts/2026-11.md', 'devices/mac/prompts/README.md'])
+        month = (a.client.repo / 'devices/mac/prompts/2026-11.md').read_text(encoding='utf-8')
+        self.assertIn('> Fix the &lt;b&gt;bug&lt;/b&gt;, token [REDACTED:github_token]', month)
+        self.assertNotIn('ide_opened_file', month)
+        self.assertEqual(a.once()['committed'], False)            # nothing new, no commit
+
+        # A new prompt is read from the new chunk only.
+        self.claude_session(a, UUID_B, [self.typed([{'type': 'image', 'source': {}},
+                                                    {'type': 'text', 'text': 'what is this?'}],
+                                                   '2026-12-01T08:00:00Z')])
+        starts = []
+        original = AgentStore.iter_lines
+
+        def spy(store, rel, entry, start_chunk=0):
+            if rel == session.relative_to(a.claude).as_posix():
+                starts.append(start_chunk)
+            return original(store, rel, entry, start_chunk)
+
+        with mock.patch.object(AgentStore, 'iter_lines', spy):
+            result = a.once()
+        self.assertEqual(starts, [1])
+        self.assertEqual(result['prompt_docs']['written'], ['2026-12.md', 'README.md'])
+        newest = prompts.query(a.client, limit=1)['prompts'][0]
+        self.assertEqual((newest['text'], newest['images'], newest['session']), ('what is this?', 1, UUID_B))
+
+    def test_codex_prompt_formats(self):
+        a = self.env('dsw')
+        uuid_c = '0199cccc-1111-7222-8333-444455556666'
+
+        def rollout(uuid, records):
+            path = a.rollout(uuid)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(''.join(line(r) for r in records), encoding='utf-8')
+
+        def user_item(text, when):
+            return {'timestamp': when, 'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': {
+                'type': 'UserMessage', 'id': 'i', 'content': [{'type': 'text', 'text': text}]}}}
+
+        def response(text, when):
+            return {'timestamp': when, 'type': 'response_item', 'payload': {
+                'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': text}]}}
+
+        rollout(UUID_A, [   # current Codex apps
+            {'type': 'session_meta', 'payload': {'id': UUID_A, 'cwd': '/work/app'}},
+            response('<environment_context>\n  <cwd>/work/app</cwd>\n</environment_context>', '2026-11-20T01:00:00Z'),
+            user_item('<in-app-browser-context source="ambient-ui-state">\nurl\n</in-app-browser-context>\n\n'
+                      '# Files mentioned by the user:\n\n## spec.pdf: /tmp/spec.pdf\n\n## My request:\n'
+                      'Summarise the spec', '2026-11-20T01:00:01Z'),
+            response('Summarise the spec', '2026-11-20T01:00:01Z'),
+            user_item('<send_user_message_question_reply>\n[{"question": "Which one?", "answer": "The first"}]\n'
+                      '</send_user_message_question_reply>', '2026-11-20T01:05:00Z'),
+            {'timestamp': '2026-11-20T01:05:02Z', 'type': 'event_msg', 'payload': {
+                'type': 'item_completed', 'item': {'type': 'AgentMessage', 'content': [{'type': 'text', 'text': 'no'}]}}},
+        ])
+        rollout(UUID_B, [   # older CLI versions
+            {'type': 'session_meta', 'payload': {'id': UUID_B, 'cwd': '/work/cli'}},
+            {'timestamp': '2026-11-21T01:00:00Z', 'type': 'event_msg',
+             'payload': {'type': 'user_message', 'message': 'old style', 'images': ['data:']}},
+            response('old style', '2026-11-21T01:00:00Z'),
+        ])
+        rollout(uuid_c, [   # oldest: prompts exist only as response items
+            {'type': 'session_meta', 'payload': {'id': uuid_c, 'cwd': '/work/old'}},
+            response('# AGENTS.md instructions for /work/old\n\nbe brief', '2026-11-22T01:00:00Z'),
+            response('<user_instructions>x</user_instructions>', '2026-11-22T01:00:00Z'),
+            response('very old prompt', '2026-11-22T01:00:01Z'),
+        ])
+        (a.codex / 'history.jsonl').write_text(line({'session_id': UUID_A, 'ts': 1, 'text': 'index copy'}))
+        a.once()
+        got = prompts.query(a.client, limit=0)['prompts']
+        self.assertEqual([(p['text'], p['cwd'], p['files'], p['images']) for p in got], [
+            ('very old prompt', '/work/old', [], 0),
+            ('old style', '/work/cli', [], 1),
+            ('Q: Which one?\nA: The first', '/work/app', [], 0),
+            ('Summarise the spec', '/work/app', ['spec.pdf'], 0)])
+
+    def test_markdown_rendering(self):
+        p = {'t': '2026-11-20T01:00:00+00:00', 'agent': 'codex', 'device': 'mac', 'cwd': '/a/proj',
+             'session': UUID_A, 'text': 'see <script>\nline\\\nnext\n```\nx < y\n'}
+        long = dict(p, t='2026-11-20T02:00:00+00:00', text='\n'.join('line %d' % i for i in range(30)))
+        pasted = dict(p, t='2026-11-21T02:00:00+00:00', text='look:\n<pasted_content id="1">\nhello\n</pasted_content>')
+        docs = prompts.render([p, long, pasted], 'My Mac', [('dsw', 'DSW')], tz=datetime.timezone.utc)
+        month = docs['2026-11.md']
+        self.assertIn('**01:00** · Codex · proj · <sub>0199aaaa</sub>\n\n> see &lt;script&gt;  \n> line\\\n> next  \n'
+                      '> ```\n> x < y\n> ```\n', month)               # code untouched, open fence closed
+        self.assertIn('<details><summary>line 0 (30 lines)</summary>\n\n> line 0  \n', month)
+        self.assertIn('> look:\n>\n> _Pasted:_\n>\n> > hello', month)
+        self.assertLess(month.index('2026-11-21 Saturday'), month.index('2026-11-20 Friday'))
+        readme = docs['README.md']
+        self.assertIn('**3 prompts** in 1 sessions, 2026-11-20 to 2026-11-21.', readme)
+        self.assertIn('Other devices: [DSW](../../dsw/prompts/README.md)', readme)
+        self.assertIn('| [2026-11](2026-11.md) | 3 | 3 |', readme)
+        self.assertIn('- [2026-11-21 02:00](2026-11.md#2026-11-21-saturday) · Codex · proj · look: \\[pasted text\\]',
+                      readme)
+
+    def test_prompts_command_searches_every_device(self):
+        mac, dsw = self.env('mac'), self.env('dsw')
+        self.claude_session(mac, UUID_B, [self.typed('Fix the login bug', '2026-11-20T01:00:00Z')])
+        mac.once()
+        path = dsw.rollout(UUID_A)
+        path.parent.mkdir(parents=True)
+        path.write_text(line({'type': 'session_meta', 'payload': {'id': UUID_A, 'cwd': '/srv/app'}}) +
+                        line({'timestamp': '2026-11-21T01:00:00Z', 'type': 'event_msg',
+                              'payload': {'type': 'user_message', 'message': 'Deploy the fix'}}))
+        dsw.once()
+        mac.client.pull()
+        result = prompts.query(mac.client, grep='FIX')
+        self.assertEqual([(p['device'], p['agent']) for p in result['prompts']], [('dsw', 'codex'), ('mac', 'claude-code')])
+        self.assertEqual(prompts.query(mac.client, device='mac', since='2026-11-22')['prompts'], [])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.main(['--state-dir', str(mac.client.state), 'prompts', '--session', UUID_A[:8], '--markdown'])
+        self.assertIn('· Codex · dsw · app · <sub>0199aaaa</sub>\n\n> Deploy the fix', out.getvalue())
+        readme = (mac.client.repo / 'devices/mac/prompts/README.md').read_text(encoding='utf-8')
+        self.assertNotIn('Other devices', readme)                  # dsw had no prompt files yet
+        mac.once()
+        readme = (mac.client.repo / 'devices/mac/prompts/README.md').read_text(encoding='utf-8')
+        self.assertIn('Other devices: [dsw](../../dsw/prompts/README.md)', readme)
+        with self.assertRaises(ValueError):
+            prompts.query(mac.client, since='last week')
+
+    def test_a_failing_prompt_list_never_stops_the_backup(self):
+        a = self.env('mac')
+        self.claude_session(a, UUID_B, [self.typed('hello', '2026-11-20T01:00:00Z')])
+        with mock.patch.object(prompts, 'write_docs', side_effect=KeyError('broken')):
+            result = a.once()
+        self.assertEqual((result['committed'], result['sync']['github']), (True, 'pushed'))
+        self.assertIn('error', result['prompt_docs'])
+        (a.client.local / 'prompts-cache.json').write_text('{"version": 1, "files": {"x": 1}}')
+        self.assertEqual(a.once()['prompt_docs']['prompts'], 1)    # a damaged cache is rebuilt
+
+    def test_prompt_docs_can_be_turned_off(self):
+        a = self.env('mac')
+        a.client.cfg['prompt_docs'] = False
+        self.claude_session(a, UUID_B, [self.typed('hello', '2026-11-20T01:00:00Z')])
+        self.assertNotIn('prompt_docs', a.once())
+        self.assertFalse((a.client.repo / 'devices/mac/prompts').exists())
 
 
 class UnitTests(unittest.TestCase):

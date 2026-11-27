@@ -332,10 +332,21 @@ class Client:
         self._write_device_info(changed_any)
         write_json(self.local / 'cache.json', cache)
         write_json(self.local / 'db-snapshots.json', db_times)
-        committed = self._commit()
+        result = {'device': self.device, 'agents': summary}
+        if self.cfg.get('prompt_docs', True):
+            result['prompt_docs'] = self._prompt_docs()
+        result['committed'] = self._commit()
         self.update_status(time=now(), device=self.device, last_checkpoint=now(), agents=summary,
                            tool_version=__version__)
-        return {'device': self.device, 'committed': committed, 'agents': summary}
+        return result
+
+    def _prompt_docs(self):
+        """Rewrite devices/<own>/prompts/ (docs/prompts.md). A failure never stops the backup."""
+        from . import prompts
+        try:
+            return prompts.write_docs(self)
+        except Exception as exc:  # noqa: BLE001 - the list is optional; the backup must go on
+            return {'error': describe_error(exc)}
 
     def _backup_file(self, store, src, entry, transform):
         if src.kind == 'jsonl':
